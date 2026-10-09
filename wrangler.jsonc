@@ -13,6 +13,12 @@
 		{
 			"binding": "DDD_2026_DB",
 			"database_name": "perth-ai-ddd-2026"
+		},
+		// The Quokka Run leaderboard (/quokka-run). Permanent, unlike the one
+		// above: keep it when the kiosk comes down. See docs/quokka-run.md.
+		{
+			"binding": "QUOKKA_RUN_DB",
+			"database_name": "perth-ai-quokka-run"
 		}
 	]
 }

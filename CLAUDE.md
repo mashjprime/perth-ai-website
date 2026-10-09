@@ -11,6 +11,10 @@ server, no API keys. `npm run build` produces plain HTML in `dist/`.
 **One temporary exception:** the DDD Perth 2026 booth kiosk at `/ddd-2026` has API routes and a D1
 database. Read [docs/ddd-2026.md](docs/ddd-2026.md) before touching anything under `ddd-2026`.
 
+**One permanent exception:** the Quokka Run game at `/quokka-run` runs on client JavaScript, and its
+leaderboard has an API route and its own D1 database. Read [docs/quokka-run.md](docs/quokka-run.md)
+before touching it.
+
 ```bash
 npm run dev
 ```
@@ -33,6 +37,7 @@ the thing you want to change is in `src/data/` or `src/content/`. It usually is.
 | Form endpoints and intro copy | `src/data/forms.json` |
 | Blog posts | `src/content/blog/*.md` — one file per post |
 | Colours, fonts, spacing tokens | `src/styles/global.css` (the `@theme` block) |
+| Quokka Run gate statements | `src/data/quokkaRunStatements.json` |
 | Brand assets (logos, style guide) | `docs/branding/` — read-only source, see its README |
 | The logo mark | `src/components/Logo.astro` |
 
@@ -48,6 +53,7 @@ src/
   components/   Reusable pieces (Header, Footer, Section, EoiForm, LumaEmbed…)
   layouts/      Base.astro — the page shell, <head>, header + footer
   pages/        One file per route
+  scripts/      Client JavaScript, currently only the Quokka Run game
   styles/       global.css — design tokens live here
 public/         Static files served as-is (brand assets, favicons, robots.txt, _headers)
 ```
