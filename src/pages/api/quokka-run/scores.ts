@@ -13,15 +13,19 @@ const MAX_SAVES_PER_MINUTE = 30;
 
 const ORDER = 'ORDER BY score DESC, updated_at ASC, player ASC';
 
+// The top of the board, plus where `player` (a name the device remembers)
+// stands, so someone outside the top 10 can still see their place.
 export const GET: APIRoute = async ({ url }) => {
   await ensureSchema();
   // Clamped both ways: SQLite reads a negative LIMIT as "no limit".
   const limit = Math.min(50, Math.max(1, Math.round(Number(url.searchParams.get('limit'))) || 10));
-  const { results } = await db()
+  const { results: top } = await db()
     .prepare(`SELECT name, score FROM scores WHERE hidden = 0 ${ORDER} LIMIT ?`)
     .bind(limit)
     .all();
-  return json(results);
+  const name = (url.searchParams.get('player') ?? '').slice(0, 64);
+  const me = name ? await standing(validateScore({ name }).clean.name.toLowerCase()) : null;
+  return json({ top, me });
 };
 
 // Saves a run if it beats the best under that name, and says where the name stands.
@@ -53,22 +57,26 @@ export const POST: APIRoute = async ({ request }) => {
     .bind(player, name, score, correct, rounds)
     .run();
 
-  // Where the name stands now: its best (which may be an earlier run) and its
-  // place on the board. No rank if the name has been hidden.
-  const best = await db()
-    .prepare('SELECT score, hidden, updated_at FROM scores WHERE player = ?')
-    .bind(player)
-    .first<{ score: number; hidden: number; updated_at: string }>();
-  const rank =
-    best && !best.hidden
-      ? await db()
-          .prepare(
-            `SELECT COUNT(*) + 1 AS rank FROM scores WHERE hidden = 0
-             AND (score > ? OR (score = ? AND (updated_at < ? OR (updated_at = ? AND player < ?))))`
-          )
-          .bind(best.score, best.score, best.updated_at, best.updated_at, player)
-          .first<number>('rank')
-      : null;
-
-  return json({ ok: true, improved: saved.meta.changes > 0, best: best?.score ?? score, rank });
+  const me = await standing(player);
+  return json({ ok: true, improved: saved.meta.changes > 0, best: me?.score ?? score, rank: me?.rank ?? null });
 };
+
+// Where a name stands: its best score (which may be an earlier run) and its
+// place on the board, matching ORDER. Null if it isn't on the board (never
+// saved, or hidden).
+async function standing(player: string) {
+  if (!player) return null;
+  const row = await db()
+    .prepare('SELECT name, score, updated_at FROM scores WHERE player = ? AND hidden = 0')
+    .bind(player)
+    .first<{ name: string; score: number; updated_at: string }>();
+  if (!row) return null;
+  const rank = await db()
+    .prepare(
+      `SELECT COUNT(*) + 1 AS rank FROM scores WHERE hidden = 0
+       AND (score > ? OR (score = ? AND (updated_at < ? OR (updated_at = ? AND player < ?))))`
+    )
+    .bind(row.score, row.score, row.updated_at, row.updated_at, player)
+    .first<number>('rank');
+  return { name: row.name, score: row.score, rank: rank ?? null };
+}

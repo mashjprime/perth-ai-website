@@ -28,8 +28,8 @@ const LEVELS = [
   { speed: 440, gap: [0.95, 0.9], adds: ['bug', 'gpu'] },
   { speed: 520, gap: [0.9, 0.8], adds: ['sign'], note: '429 rate limits ahead' },
   { speed: 600, gap: [0.9, 0.7], adds: ['pair'], note: 'Hallucinations come in pairs now' },
-  { speed: 680, gap: [0.85, 0.6], adds: ['drone'], note: 'Flying hallucinations — stay low!' },
-  { speed: 760, gap: [0.85, 0.5], adds: ['triple'], note: 'Triple hallucination' },
+  { speed: 680, gap: [0.85, 0.6], adds: ['drone'], note: 'Flying hallucinations. Stay low.' },
+  { speed: 760, gap: [0.85, 0.5], adds: ['triple'], note: 'Hallucinations in threes now' },
   { speed: 840, gap: [0.8, 0.45], adds: [], note: 'Faster…' },
   { speed: 900, gap: [0.8, 0.4], adds: [], note: 'Maximum hallucination' },
 ].map((level, i, all) => ({ ...level, kinds: all.slice(0, i + 1).flatMap((l) => l.adds) }));
@@ -74,6 +74,7 @@ export function createEngine(canvas, {
   onGateResult,
   onLevel,
   onOver,
+  onSound, // 'jump', 'token' or 'crash', for sound effects
 }) {
   const ctx = canvas.getContext('2d');
   const art = sprites();
@@ -82,6 +83,8 @@ export function createEngine(canvas, {
   let G = 0; // ground line
   let raf = 0;
   let last = 0;
+  let paused = false;
+  let overTimer = 0;
 
   const s = {
     clock: 0,
@@ -132,6 +135,8 @@ export function createEngine(canvas, {
     }
     ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
+    // Resizing clears the canvas, and a paused game isn't drawing frames.
+    if (paused) draw();
   }
   // Re-fit on rotation and viewport changes (iOS Safari fires visualViewport,
   // not always resize). These are removed in stop() so they do not accumulate
@@ -148,8 +153,11 @@ export function createEngine(canvas, {
   // Fixed-height jump: a quick tap on a touch screen should clear anything.
   function jump() {
     if (s.over) return;
-    if (onGround()) s.vy = JUMP_V;
-    else s.buffered = BUFFER_S;
+    if (paused) return;
+    if (onGround()) {
+      s.vy = JUMP_V;
+      onSound?.('jump');
+    } else s.buffered = BUFFER_S;
   }
 
   // ----- spawning -----
@@ -226,6 +234,7 @@ export function createEngine(canvas, {
       if (onGround()) {
         s.vy = JUMP_V;
         s.buffered = -1;
+        onSound?.('jump');
       }
     }
     if (!onGround() || s.vy > 0) {
@@ -277,6 +286,7 @@ export function createEngine(canvas, {
         c.taken = true;
         s.tokens += 1;
         s.score += TOKEN_POINTS;
+        onSound?.('token');
       }
     }
     if (!invincible) {
@@ -284,7 +294,8 @@ export function createEngine(canvas, {
       if (hit) {
         s.over = true;
         s.cause = hit.kind;
-        setTimeout(() => onOver?.(result()), 900);
+        onSound?.('crash');
+        overTimer = setTimeout(() => onOver?.(result()), 900);
       }
     }
   }
@@ -317,7 +328,7 @@ export function createEngine(canvas, {
     ctx.fillRect(o.x - 6, top, o.w + 12, 30);
     ctx.fillStyle = COLORS.sign;
     ctx.fillRect(o.x - 3, top + 3, o.w + 6, 24);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#050a17'; // dark on coral: white would be 2.7:1
     ctx.font = '700 17px "Space Grotesk Variable", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -372,7 +383,7 @@ export function createEngine(canvas, {
     ctx.font = '700 13px "Space Grotesk Variable", sans-serif';
     ctx.fillText('HALLUCINATION', x + GATE.w / 2, splitY + GATE.split / 2 - 8);
     ctx.font = '700 15px "Space Grotesk Variable", sans-serif';
-    ctx.fillText('→ run', x + GATE.w / 2, splitY + GATE.split / 2 + 14);
+    ctx.fillText('run under', x + GATE.w / 2, splitY + GATE.split / 2 + 14);
     ctx.globalAlpha = 1;
   }
 
@@ -423,10 +434,25 @@ export function createEngine(canvas, {
 
   return {
     jump,
+    // Pausing stops the loop; resuming starts the clock again from that frame,
+    // so no time passes while paused. A run that's already over can't pause.
+    pause() {
+      if (paused || s.over) return false;
+      paused = true;
+      cancelAnimationFrame(raf);
+      return true;
+    },
+    resume() {
+      if (!paused) return;
+      paused = false;
+      last = 0;
+      raf = requestAnimationFrame(loop);
+    },
     score: () => Math.round(s.score),
     stats: () => ({ tokens: s.tokens, gatesRight: s.gatesRight, gatesSeen: s.gatesSeen, level: s.level + 1 }),
     stop() {
       cancelAnimationFrame(raf);
+      clearTimeout(overTimer);
       ro.disconnect();
       window.removeEventListener('orientationchange', onViewport);
       window.visualViewport && window.visualViewport.removeEventListener('resize', onViewport);

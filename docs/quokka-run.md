@@ -15,9 +15,13 @@ leaderboard needs an API and a database. Everything else on the site is still st
 | Speed, gates, scoring, difficulty, obstacles | Constants at the top of `src/scripts/quokka-run/engine.js` |
 | Which scores are accepted | `src/scripts/quokka-run/scoring.js` (the API uses it too) |
 | The page, its copy and every screen's markup | `src/pages/quokka-run.astro` |
-| What happens on each screen | `src/scripts/quokka-run/game.js` |
+| What happens on each screen, pausing, keys | `src/scripts/quokka-run/game.js` |
+| Full screen | `src/scripts/quokka-run/fullscreen.js` |
+| Sound effects | `src/scripts/quokka-run/sound.js` (synthesised, no audio files) |
 | Pixel art | `src/scripts/quokka-run/sprites.js` |
-| The homepage card and its quokka | `src/pages/index.astro`, `src/components/QuokkaSprite.astro` |
+| The sprites on the page and the homepage card | `src/components/PixelSprite.astro` (SVG from the same pixel maps) |
+| The homepage card | `src/pages/index.astro` |
+| The link preview image | `public/og-quokka-run.jpg` (1200×630, drawn from the game's own art) |
 | Leaderboard API | `src/pages/api/quokka-run/scores.ts` |
 | Database table | `src/lib/quokkaRun.ts` |
 
@@ -28,11 +32,28 @@ Some things to know before editing:
   same run, so a true/false pair can't give each other away. Check facts before adding them: the
   `why` is shown as the answer.
 - **Scoring and the plausibility check go together.** `scoring.js` refuses a score the game
-  couldn't have produced in the time the run took (about 60 points a second at most). Make points
-  easier to earn in `engine.js` and you may need to raise that limit, or real scores get refused.
+  couldn't have produced in the time the run took. The game tops out around 46 points a second and
+  the limit is 60, checked by simulating runs of every length at 10 to 240 frames a second. Make
+  points easier to earn in `engine.js` and you may need to raise it, or real scores get refused.
 - **The kiosk has its own copy.** `public/ddd-2026/` still has the original game for the booth. The
   two don't share code, so a change here doesn't reach the kiosk, and the kiosk can be deleted
   without touching this.
+
+## How it plays
+
+- **Full screen** is the button in the bottom corner, or F. On phones and tablets a run starts in
+  full screen by itself (unless the player has left it once), and Android turns sideways too.
+  iPhones don't let a page go truly full screen, so there the game fills the window instead and the
+  back gesture closes it rather than leaving the page.
+- **Pausing:** P, Esc or the pause button. A run also pauses by itself when the tab is hidden, the
+  window loses focus, the player leaves full screen, or the game scrolls mostly off screen. It
+  carries on after a 3, 2, 1.
+- **Sound** is on by default and only starts once the player has pressed something. M or the
+  speaker button turns it off, and that's remembered on the device.
+- **Remembered on the device:** sound on or off, the player's best score and their leaderboard
+  name (so the board can show where they are, even outside the top 10). Nothing else.
+- **Reduced motion:** the start screen's self-playing demo stands still, and the level-up and
+  countdown animations are off. The run itself still moves; it's the game.
 
 ## The leaderboard
 
@@ -53,6 +74,10 @@ id it prints into `wrangler.jsonc` as `database_id`:
 ```bash
 npx wrangler d1 create perth-ai-quokka-run
 ```
+
+`GET /api/quokka-run/scores?limit=10&player=Sam` returns `{ top, me }`: the top of the board and
+where that name stands (`null` if it isn't on it). `POST` with `{ name, score, correct, rounds,
+seconds }` saves a run if it's that name's best and returns `{ improved, best, rank }`.
 
 ### Hiding a name
 

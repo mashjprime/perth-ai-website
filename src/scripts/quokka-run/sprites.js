@@ -1,7 +1,7 @@
 // Pixel-art sprites for Quokka Run, drawn from character maps so there are no
 // image assets to license. Each character is one pixel; '.' is transparent.
 // These are artwork colours, not UI colours, so they live here rather than in
-// global.css. QuokkaSprite.astro draws the quokka from the same maps as SVG.
+// global.css. PixelSprite.astro draws them from the same maps as SVG.
 
 export const PALETTE = {
   o: '#2b1a10', // outline
@@ -107,5 +107,10 @@ export function sprites() {
   return cache;
 }
 
-// The jumping quokka's pixel rows, for drawing it without a canvas.
-export const QUOKKA_JUMP = [...QUOKKA_TOP, ...LEGS.jump];
+// Each sprite's pixel rows (one frame), for drawing without a canvas. See PixelSprite.astro.
+export const SPRITE_ROWS = {
+  quokka: [...QUOKKA_TOP, ...LEGS.jump],
+  bug: BUG,
+  gpu: [...FLAMES[0], ...GPU_BASE],
+  drone: [...PROPELLERS[0], ...BUG],
+};
