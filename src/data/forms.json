@@ -11,5 +11,11 @@
     "accessKey": "ac17bbac-6677-481a-89ea-42f08f88bb7f",
     "title": "Sponsor or host",
     "intro": "Venue, food, prizes, hardware or paid sponsorship — all of it helps, and all of it keeps events free for the people who come."
+  },
+  "speaker": {
+    "action": "https://api.web3forms.com/submit",
+    "accessKey": "ac17bbac-6677-481a-89ea-42f08f88bb7f",
+    "title": "Speak or demo at AI Disrupt",
+    "intro": "Built something, learned something the hard way, or have a demo people should see? We want speakers from first-timers to veterans."
   }
 }
