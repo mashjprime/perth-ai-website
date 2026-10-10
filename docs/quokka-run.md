@@ -88,7 +88,8 @@ npx wrangler d1 create perth-ai-quokka-run
 `GET /api/quokka-run/scores?limit=10&player=Sam` returns `{ top, me }`: the top of the board and
 where that name stands (`null` if it isn't on it). `POST` with `{ name, email?, score, correct,
 rounds, seconds }` saves a run if it's that name's best and returns `{ improved, best, rank,
-entered }`, where `entered` says whether it's now that name's competition entry.
+entry, closed }`: `entry` is the best score entered with that email (`null` if it isn't an
+entry), and `closed` says an email came in after the competition closed.
 
 ### Hiding a name
 
@@ -117,8 +118,9 @@ While it's on and before it closes:
 - the page shows the prize and the terms, and the start screen says what's up for grabs;
 - the save form asks for an optional email, "to be in the running";
 - a score saved with an email is an entry. Entries live in their own table,
-  `competition_entries`: one per name, holding the best score saved under it with an email, and
-  that email.
+  `competition_entries`: one per email, holding the best score saved with it and the name it was
+  saved under. Keyed by email, not name, so two players called Sam each keep their own entry, and
+  nobody can take over someone else's by borrowing their name.
 
 At the closing time the page hides all of that by itself and the API stops taking entries, even
 before anyone redeploys.
@@ -126,7 +128,7 @@ before anyone redeploys.
 **Picking the winner.** The top entries, leaving out hidden names:
 
 ```bash
-npx wrangler d1 execute perth-ai-quokka-run --remote --command "SELECT s.name, e.score, e.email, e.updated_at FROM competition_entries e JOIN scores s USING (player) WHERE s.hidden = 0 ORDER BY e.score DESC, e.updated_at ASC LIMIT 10"
+npx wrangler d1 execute perth-ai-quokka-run --remote --command "SELECT e.name, e.score, e.email, e.updated_at FROM competition_entries e LEFT JOIN scores s USING (player) WHERE COALESCE(s.hidden, 0) = 0 ORDER BY e.score DESC, e.updated_at ASC LIMIT 10"
 ```
 
 Look the top few over before announcing: with a prize on the line, someone may post a fake score

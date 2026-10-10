@@ -26,8 +26,13 @@ interface D1Statement {
   run(): Promise<{ meta: { changes: number } }>;
 }
 
+interface D1Result {
+  results: unknown[];
+  meta: { changes: number };
+}
+
 interface QuokkaRunEnv {
-  QUOKKA_RUN_DB: { prepare(sql: string): D1Statement };
+  QUOKKA_RUN_DB: { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<D1Result[]> };
 }
 
 export const db = () => (env as unknown as QuokkaRunEnv).QUOKKA_RUN_DB;
@@ -43,7 +48,8 @@ export const db = () => (env as unknown as QuokkaRunEnv).QUOKKA_RUN_DB;
 //   updated_at  when this score was set, in UTC. Ties go to whoever got there first
 //
 // competition_entries, only created while a competition is active: one row per
-// name, with the best score saved under it with an email, and that email.
+// email (lower-cased), with the best score saved with it and the name it was
+// saved under (`player` is that name lower-cased, to match scores.player).
 let ready: Promise<unknown> | undefined;
 export function ensureSchema() {
   ready ??= migrate()
@@ -76,8 +82,9 @@ async function migrate() {
     await db()
       .prepare(
         `CREATE TABLE IF NOT EXISTS competition_entries (
-          player TEXT PRIMARY KEY,
-          email TEXT NOT NULL,
+          email TEXT PRIMARY KEY,
+          player TEXT NOT NULL,
+          name TEXT NOT NULL,
           score INTEGER NOT NULL,
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )`

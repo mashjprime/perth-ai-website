@@ -45,18 +45,35 @@ export const CAUSES = {
   drone: 'Jumped into a flying hallucination',
 };
 
-const COLORS = {
-  ground: '#6c789d',
-  road: 'rgb(5 10 23 / 0.88)',
-  pebble: '#232f52',
-  fact: '#00c2ff',
-  hallu: '#ff6b8a',
-  token: '#ffc785',
-  tokenEdge: '#dc7700',
-  sign: '#ff6b8a',
-  signEdge: '#8c1d36',
-  post: '#99a0b8',
-};
+// The canvas uses the site's own colour tokens (src/styles/global.css), read
+// from the page's CSS variables, so it follows the design system and there's
+// no second copy of the palette to drift. (The pixel-art palette in
+// sprites.js is artwork, not UI colour, and is the one exception.)
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  const token = (name) => css.getPropertyValue(`--color-${name}`).trim();
+  const withAlpha = (name, alpha) => {
+    const hex = token(name).replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return `rgb(${r} ${g} ${b} / ${alpha})`;
+  };
+  return {
+    ground: token('ink-400'),
+    road: withAlpha('ink-950', 0.88),
+    pebble: token('ink-700'),
+    post: token('ink-300'),
+    gatePost: token('ink-100'),
+    fact: token('azure-500'),
+    hallu: token('coral-500'),
+    token: token('sunset-300'),
+    tokenEdge: token('sunset-600'),
+    sign: token('coral-500'),
+    signEdge: token('coral-700'),
+    signText: token('ink-950'), // dark on coral: white would be 2.7:1
+    fogClear: withAlpha('ink-950', 0),
+    fog: withAlpha('ink-950', 0.96),
+  };
+}
 
 // ---------- engine ----------
 
@@ -75,6 +92,7 @@ export function createEngine(canvas, {
 }) {
   const ctx = canvas.getContext('2d');
   const art = sprites();
+  const COLORS = palette();
   let W = 0;
   let H = 0;
   let G = 0; // ground line
@@ -327,7 +345,7 @@ export function createEngine(canvas, {
     ctx.fillRect(o.x - 6, top, o.w + 12, 30);
     ctx.fillStyle = COLORS.sign;
     ctx.fillRect(o.x - 3, top + 3, o.w + 6, 24);
-    ctx.fillStyle = '#050a17'; // dark on coral: white would be 2.7:1
+    ctx.fillStyle = COLORS.signText;
     ctx.font = '700 17px "Space Grotesk Variable", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -357,7 +375,7 @@ export function createEngine(canvas, {
     const topY = G - GATE.top;
     if (!front) {
       // posts
-      ctx.fillStyle = '#e0e3eb';
+      ctx.fillStyle = COLORS.gatePost;
       ctx.fillRect(x - 6, topY - 8, 6, GATE.top + 8);
       ctx.fillRect(x + GATE.w, topY - 8, 6, GATE.top + 8);
       ctx.fillRect(x - 6, topY - 8, GATE.w + 12, 6);
@@ -373,48 +391,62 @@ export function createEngine(canvas, {
     ctx.globalAlpha = g.done ? 0.4 : 1;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    const { fact, hallu } = gateLabels();
     ctx.fillStyle = COLORS.fact;
-    labels(x + GATE.w / 2, (topY + splitY) / 2, ['FACT', 22], ['↑ jump', 15]);
+    drawLabels(x + GATE.w / 2, (topY + splitY) / 2, fact);
     ctx.fillStyle = COLORS.hallu;
-    // On a zoomed-out phone HALLUCINATION won't fit the gate at a readable size, so it splits.
-    const hallu = fits('HALLUCINATION', 13) ? [['HALLUCINATION', 13]] : [['HALLU-', 13], ['CINATION', 13]];
-    labels(x + GATE.w / 2, splitY + GATE.split / 2, ...hallu, ['run under', 15]);
+    drawLabels(x + GATE.w / 2, splitY + GATE.split / 2, hallu);
     ctx.globalAlpha = 1;
   }
 
-  // Lines of gate label centred on (cx, cy). Each is its normal size, or
-  // MIN_LABEL_PX on screen if that's bigger (a zoomed-out phone), but never
-  // wider than the gate.
-  const labelSize = (text, size) => {
-    const px = Math.max(size, MIN_LABEL_PX / zoom);
-    ctx.font = `700 ${px}px "Space Grotesk Variable", sans-serif`;
-    return Math.min(px, (px * (GATE.w - 10)) / ctx.measureText(text).width);
-  };
-  const fits = (text, size) => labelSize(text, size) * zoom >= MIN_LABEL_PX - 0.5;
+  // The gate's labels, sized for the current zoom. Each line is its normal
+  // size, or MIN_LABEL_PX on screen if that's bigger (a zoomed-out phone), but
+  // never wider than the gate; on a phone HALLUCINATION won't fit at a
+  // readable size, so it splits. Measured once per zoom (and again once the
+  // font has loaded), not every frame.
+  let labelCache = null;
+  document.fonts?.ready.then(() => (labelCache = null));
+  function gateLabels() {
+    if (labelCache?.zoom === zoom) return labelCache;
+    const size = (text, base) => {
+      const px = Math.max(base, MIN_LABEL_PX / zoom);
+      ctx.font = `700 ${px}px "Space Grotesk Variable", sans-serif`;
+      return Math.min(px, (px * (GATE.w - 10)) / ctx.measureText(text).width);
+    };
+    const lines = (...specs) => specs.map(([text, base]) => ({ text, px: size(text, base) }));
+    const whole = size('HALLUCINATION', 13) * zoom >= MIN_LABEL_PX - 0.5;
+    labelCache = {
+      zoom,
+      fact: lines(['FACT', 22], ['↑ jump', 15]),
+      hallu: whole
+        ? lines(['HALLUCINATION', 13], ['run under', 15])
+        : lines(['HALLU-', 13], ['CINATION', 13], ['run under', 15]),
+    };
+    return labelCache;
+  }
 
-  function labels(cx, cy, ...lines) {
-    const fonts = lines.map(([text, size]) => labelSize(text, size));
+  function drawLabels(cx, cy, lines) {
     const gap = 4;
-    let y = cy - (fonts.reduce((a, b) => a + b, 0) + gap * (lines.length - 1)) / 2;
-    lines.forEach(([text], i) => {
-      ctx.font = `700 ${fonts[i]}px "Space Grotesk Variable", sans-serif`;
-      ctx.fillText(text, cx, y + fonts[i] / 2);
-      y += fonts[i] + gap;
-    });
+    let y = cy - (lines.reduce((sum, l) => sum + l.px, 0) + gap * (lines.length - 1)) / 2;
+    for (const { text, px } of lines) {
+      ctx.font = `700 ${px}px "Space Grotesk Variable", sans-serif`;
+      ctx.fillText(text, cx, y + px / 2);
+      y += px + gap;
+    }
   }
 
   // Past VIEW_W the road fades to dark, so a wide screen shows more sky and
-  // city but no more of what's coming.
+  // city but no more of what's coming. It starts at VIEW_W exactly, so
+  // everything a 16:9 screen sees is just as clear here; obstacles appear at
+  // VIEW_W + 20, inside the dark.
+  const fogEdge = ctx.createLinearGradient(VIEW_W, 0, VIEW_W + 20, 0);
+  fogEdge.addColorStop(0, COLORS.fogClear);
+  fogEdge.addColorStop(1, COLORS.fog);
   function drawFog() {
     if (W <= VIEW_W) return;
-    // Starts at VIEW_W exactly, so everything a 16:9 screen sees is just as
-    // clear here; obstacles appear at VIEW_W + 20, inside the dark.
-    const fade = ctx.createLinearGradient(VIEW_W, 0, VIEW_W + 20, 0);
-    fade.addColorStop(0, 'rgb(5 10 23 / 0)');
-    fade.addColorStop(1, 'rgb(5 10 23 / 0.96)');
-    ctx.fillStyle = fade;
+    ctx.fillStyle = fogEdge;
     ctx.fillRect(VIEW_W, 0, 20, H);
-    ctx.fillStyle = 'rgb(5 10 23 / 0.96)';
+    ctx.fillStyle = COLORS.fog;
     ctx.fillRect(VIEW_W + 20, 0, W - VIEW_W - 20, H);
   }
 

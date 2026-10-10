@@ -67,6 +67,8 @@ public/         Static files served as-is (brand assets, favicons, robots.txt, _
   from `docs/branding/Perth AI Branding/Perth AI - Style Guide.pdf` — that PDF is the source of
   truth, not this table. Each family's `-500` step is the exact hex the guide gives; every other
   step is derived from it and contrast-checked. Change an anchor and you must re-derive the ramp.
+  Quokka Run's canvas reads the tokens from CSS variables; the one exception is its pixel-art
+  palette in `src/scripts/quokka-run/sprites.js`, which is artwork, not UI colour.
 
   | Token | Guide colour | Use for |
   | --- | --- | --- |

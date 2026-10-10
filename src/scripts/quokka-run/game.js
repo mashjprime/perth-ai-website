@@ -97,6 +97,7 @@ export function startQuokkaRun(stage) {
   let noticeTimer = 0;
   let resultsAt = 0;
   let boardRequest = 0; // so an older leaderboard response can't overwrite a newer one
+  const boardsInView = new Set(); // refresh only while someone could be looking at one
 
   const fullscreen = createFullscreen(stage, {
     onChange(on) {
@@ -358,7 +359,7 @@ export function startQuokkaRun(stage) {
       if (run !== saving) return;
       if (!res.ok) return showErrors(data.errors ?? { _form: 'That didn’t save. Try again in a minute.' });
       store.set(NAME_KEY, check.clean.name);
-      showSaved(data, check.clean.name, Boolean(check.clean.email));
+      showSaved(data, check.clean.name);
       loadBoards();
     } catch {
       if (run !== saving) return;
@@ -371,7 +372,9 @@ export function startQuokkaRun(stage) {
     }
   });
 
-  function showSaved({ rank, best, improved, entered }, name, gaveEmail) {
+  // `entry` is the best score entered with their email (null if not an
+  // entry); `closed` means they gave an email after the competition closed.
+  function showSaved({ rank, best, improved, entry, closed }, name) {
     const title = $('[data-saved-title]');
     const hint = $('[data-saved-hint]');
     if (rank == null) {
@@ -384,11 +387,15 @@ export function startQuokkaRun(stage) {
       title.textContent = rank === 1 ? `New high score, ${name}!` : `You’re #${rank}, ${name}.`;
       hint.textContent = rank <= BOARD_SIZE ? 'You’re on the leaderboard.' : 'Play again to climb the board.';
     }
-    if (entered) {
-      hint.textContent = `${hint.textContent} You’re in the competition.`.trim();
-    } else if (gaveEmail) {
-      hint.textContent = `${hint.textContent} A higher score is already entered under that name, so this one isn’t in the competition.`.trim();
-    }
+    const competition =
+      entry != null
+        ? entry > run.score
+          ? `Your best competition entry is still ${fmt(entry)}.`
+          : 'You’re in the competition.'
+        : closed
+          ? 'The competition has closed, so this one isn’t an entry.'
+          : '';
+    hint.textContent = `${hint.textContent} ${competition}`.trim();
     el.form.hidden = true;
     el.saved.hidden = false;
     title.focus({ preventScroll: true });
@@ -597,7 +604,11 @@ export function startQuokkaRun(stage) {
   el.soundButton.setAttribute('aria-pressed', String(sound.soundOn()));
   showStart();
   loadBoards();
+  const boardWatcher = new IntersectionObserver((entries) =>
+    entries.forEach((entry) => (entry.isIntersecting ? boardsInView.add(entry.target) : boardsInView.delete(entry.target)))
+  );
+  boards.forEach((board) => boardWatcher.observe(board));
   setInterval(() => {
-    if (!document.hidden && state !== 'playing' && state !== 'counting') loadBoards();
+    if (!document.hidden && boardsInView.size && state !== 'playing' && state !== 'counting') loadBoards();
   }, BOARD_REFRESH_MS);
 }

@@ -13,19 +13,33 @@ const MAX_SAVES_PER_MINUTE = 30;
 
 const ORDER = 'ORDER BY score DESC, updated_at ASC, player ASC';
 
+// Where a name stands: its best score (which may be an earlier run) and its
+// place on the board, matching ORDER. No row if it isn't on the board (never
+// saved, or hidden).
+const STANDING = `
+  SELECT s.name, s.score, (
+    SELECT COUNT(*) + 1 FROM scores o WHERE o.hidden = 0 AND (
+      o.score > s.score OR (o.score = s.score AND (
+        o.updated_at < s.updated_at OR (o.updated_at = s.updated_at AND o.player < s.player)
+      ))
+    )
+  ) AS rank
+  FROM scores s WHERE s.player = ? AND s.hidden = 0`;
+
+type Standing = { name: string; score: number; rank: number };
+
 // The top of the board, plus where `player` (a name the device remembers)
 // stands, so someone outside the top 10 can still see their place.
 export const GET: APIRoute = async ({ url }) => {
   await ensureSchema();
   // Clamped both ways: SQLite reads a negative LIMIT as "no limit".
   const limit = Math.min(50, Math.max(1, Math.round(Number(url.searchParams.get('limit'))) || 10));
-  const { results: top } = await db()
-    .prepare(`SELECT name, score FROM scores WHERE hidden = 0 ${ORDER} LIMIT ?`)
-    .bind(limit)
-    .all();
-  const name = (url.searchParams.get('player') ?? '').slice(0, 64);
-  const me = name ? await standing(validateScore({ name }).clean.name.toLowerCase()) : null;
-  return json({ top, me });
+  const player = validateScore({ name: (url.searchParams.get('player') ?? '').slice(0, 64) }).clean.name.toLowerCase();
+  const [top, me] = await db().batch([
+    db().prepare(`SELECT name, score FROM scores WHERE hidden = 0 ${ORDER} LIMIT ?`).bind(limit),
+    db().prepare(STANDING).bind(player),
+  ]);
+  return json({ top: top.results, me: (player && (me.results[0] as Standing)) || null });
 };
 
 // Saves a run if it beats the best under that name, and says where the name
@@ -34,9 +48,11 @@ export const POST: APIRoute = async ({ request }) => {
   const body = await request.json().catch(() => null);
   const { ok, errors, clean } = validateScore(body);
   if (!ok) return json({ errors }, 400);
-  const { name, email, score, correct, rounds } = clean;
+  const { name, score, correct, rounds } = clean;
   // Lower-cased here, not with SQLite's lower(), which only handles A to Z.
   const player = name.toLowerCase();
+  const email = clean.email.toLowerCase();
+  const entering = Boolean(email) && competitionOpen();
 
   await ensureSchema();
 
@@ -47,58 +63,47 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ errors: { _form: 'The leaderboard is busy. Try saving again in a minute.' } }, 503);
   }
 
-  const saved = await db()
-    .prepare(
-      `INSERT INTO scores (player, name, score, correct, rounds) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (player) DO UPDATE SET
-         name = excluded.name, score = excluded.score, correct = excluded.correct,
-         rounds = excluded.rounds, updated_at = datetime('now')
-       WHERE excluded.score > scores.score`
-    )
-    .bind(player, name, score, correct, rounds)
-    .run();
+  // One round trip. D1 runs a batch in order, in one transaction, so the
+  // reads see the writes before them.
+  const statements = [
+    db()
+      .prepare(
+        `INSERT INTO scores (player, name, score, correct, rounds) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (player) DO UPDATE SET
+           name = excluded.name, score = excluded.score, correct = excluded.correct,
+           rounds = excluded.rounds, updated_at = datetime('now')
+         WHERE excluded.score > scores.score`
+      )
+      .bind(player, name, score, correct, rounds),
+    db().prepare(STANDING).bind(player),
+  ];
+  // A competition entry is per email, at the best score saved with it (under
+  // whatever name), so nobody can take over someone else's entry by using the
+  // same name.
+  if (entering) {
+    statements.push(
+      db()
+        .prepare(
+          `INSERT INTO competition_entries (email, player, name, score) VALUES (?, ?, ?, ?)
+           ON CONFLICT (email) DO UPDATE SET
+             player = excluded.player, name = excluded.name, score = excluded.score, updated_at = datetime('now')
+           WHERE excluded.score > competition_entries.score`
+        )
+        .bind(email, player, name, score),
+      db().prepare('SELECT score FROM competition_entries WHERE email = ?').bind(email)
+    );
+  }
+  const [saved, standing, , entry] = await db().batch(statements);
+  const me = standing.results[0] as Standing | undefined;
 
-  const entered = email && competitionOpen() ? await enter(player, email, score) : false;
-  const me = await standing(player);
-  return json({ ok: true, improved: saved.meta.changes > 0, best: me?.score ?? score, rank: me?.rank ?? null, entered });
+  return json({
+    ok: true,
+    improved: saved.meta.changes > 0,
+    best: me?.score ?? score,
+    rank: me?.rank ?? null,
+    // The best score entered with this email, or null if it isn't an entry.
+    entry: entering ? ((entry?.results[0] as { score: number } | undefined)?.score ?? null) : null,
+    // An email came in, but the competition isn't taking entries.
+    closed: Boolean(email) && !entering,
+  });
 };
-
-// A competition entry: the best score saved under a name with an email, and
-// the email that came with it. True if this email holds the name's entry now
-// (it doesn't if a higher score was already entered under the name).
-async function enter(player: string, email: string, score: number) {
-  await db()
-    .prepare(
-      `INSERT INTO competition_entries (player, email, score) VALUES (?, ?, ?)
-       ON CONFLICT (player) DO UPDATE SET
-         email = excluded.email, score = excluded.score, updated_at = datetime('now')
-       WHERE excluded.score > competition_entries.score`
-    )
-    .bind(player, email, score)
-    .run();
-  const holder = await db()
-    .prepare('SELECT email FROM competition_entries WHERE player = ?')
-    .bind(player)
-    .first<string>('email');
-  return holder?.toLowerCase() === email.toLowerCase();
-}
-
-// Where a name stands: its best score (which may be an earlier run) and its
-// place on the board, matching ORDER. Null if it isn't on the board (never
-// saved, or hidden).
-async function standing(player: string) {
-  if (!player) return null;
-  const row = await db()
-    .prepare('SELECT name, score, updated_at FROM scores WHERE player = ? AND hidden = 0')
-    .bind(player)
-    .first<{ name: string; score: number; updated_at: string }>();
-  if (!row) return null;
-  const rank = await db()
-    .prepare(
-      `SELECT COUNT(*) + 1 AS rank FROM scores WHERE hidden = 0
-       AND (score > ? OR (score = ? AND (updated_at < ? OR (updated_at = ? AND player < ?))))`
-    )
-    .bind(row.score, row.score, row.updated_at, row.updated_at, player)
-    .first<number>('rank');
-  return { name: row.name, score: row.score, rank: rank ?? null };
-}

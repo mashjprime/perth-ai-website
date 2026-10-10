@@ -26,13 +26,15 @@ const TABLE = [
 
 const last = TABLE[TABLE.length - 1];
 
-// Level `i` (0 is level 1), for any i.
+// Level `i` (0 is level 1), for any i. The engine asks every physics step, so
+// each level past the table is built once and kept.
+const built = [...TABLE];
 export function levelAt(i) {
-  if (i < TABLE.length) return TABLE[i];
+  if (built[i]) return built[i];
   const speed = Math.min(MAX_SPEED, last.speed + SPEED_STEP * (i - TABLE.length + 1));
   const before = Math.min(MAX_SPEED, last.speed + SPEED_STEP * (i - TABLE.length));
   const note = speed < MAX_SPEED ? 'Faster' : before < MAX_SPEED ? 'Top speed. Good luck.' : undefined;
-  return { ...last, speed, note };
+  return (built[i] = { ...last, speed, note });
 }
 
 // The furthest a run can travel in `seconds`, in world units: as if it ran at

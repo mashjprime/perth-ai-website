@@ -97,6 +97,11 @@ export function createFullscreen(stage, { onChange }) {
 
   const toggle = () => (isOn() ? exit() : enter());
 
+  // A reload (or a return to the page) while the window fill was on lands on
+  // its leftover history entry, which would make the next Back press appear
+  // to do nothing. Step back over it.
+  if (history.state?.quokkaRunFullscreen) history.back();
+
   document.addEventListener('fullscreenchange', sync);
   document.addEventListener('webkitfullscreenchange', sync);
   addEventListener('popstate', () => {
