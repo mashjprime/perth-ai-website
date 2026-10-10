@@ -4,18 +4,20 @@ import PageHero from '../components/PageHero.astro';
 import Section from '../components/Section.astro';
 import EoiForm from '../components/EoiForm.astro';
 import MailingList from '../components/MailingList.astro';
+import Button from '../components/Button.astro';
+import Icon from '../components/Icon.astro';
 import forms from '../data/forms.json';
 import eventTypes from '../data/eventTypes.json';
 ---
 
 <Base
   title="Get involved"
-  description="Propose a new event or mini group, offer a venue, or support Perth AI."
+  description="Propose a new event or mini group, offer a venue, speak at AI Disrupt, or support Perth AI."
 >
   <PageHero
     eyebrow="Get involved"
     title="This only works because people put their hand up"
-    lead="Hosting, suggesting, organising — pick whichever one you can actually see yourself doing."
+    lead="Hosting, suggesting, speaking, organising — pick whichever one you can actually see yourself doing."
   />
 
   {/* Event ideas */}
@@ -103,7 +105,21 @@ import eventTypes from '../data/eventTypes.json';
     </div>
   </Section>
 
-  <Section class="pt-0">
+  {/* Speaking. The form lives on the summit page, next to what the summit is. */}
+  <Section id="speak" tone="muted">
+    <div class="flex flex-col items-start gap-5 rounded-2xl bg-white p-7 sm:p-9 md:flex-row md:items-center md:justify-between">
+      <div class="max-w-2xl">
+        <h2 class="font-display text-2xl font-semibold">{forms.speaker.title}</h2>
+        <p class="mt-2 leading-relaxed text-ink-600 text-pretty">{forms.speaker.intro}</p>
+      </div>
+      <Button href="/summit#speak" variant="primary" class="shrink-0">
+        Put your hand up
+        <Icon name="arrow" class="h-4 w-4" />
+      </Button>
+    </div>
+  </Section>
+
+  <Section>
     <MailingList />
   </Section>
 </Base>
