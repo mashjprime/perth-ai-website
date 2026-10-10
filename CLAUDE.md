@@ -38,6 +38,7 @@ the thing you want to change is in `src/data/` or `src/content/`. It usually is.
 | Blog posts | `src/content/blog/*.md` — one file per post |
 | Colours, fonts, spacing tokens | `src/styles/global.css` (the `@theme` block) |
 | Quokka Run gate statements | `src/data/quokkaRunStatements.json` |
+| Quokka Run competition (prize, closing date, terms, on/off) | `src/data/quokkaRun.json` |
 | Brand assets (logos, style guide) | `docs/branding/` — read-only source, see its README |
 | The logo mark | `src/components/Logo.astro` |
 

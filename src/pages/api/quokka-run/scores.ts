@@ -1,6 +1,6 @@
 // The Quokka Run leaderboard (/quokka-run). One spot per name, at its best score.
 import type { APIRoute } from 'astro';
-import { db, ensureSchema, json } from '../../../lib/quokkaRun';
+import { competitionOpen, db, ensureSchema, json } from '../../../lib/quokkaRun';
 // Plain JS shared with the page, so both apply the same rules.
 import { validateScore } from '../../../scripts/quokka-run/scoring.js';
 
@@ -28,12 +28,13 @@ export const GET: APIRoute = async ({ url }) => {
   return json({ top, me });
 };
 
-// Saves a run if it beats the best under that name, and says where the name stands.
+// Saves a run if it beats the best under that name, and says where the name
+// stands. With an email while a competition is open, it's also an entry.
 export const POST: APIRoute = async ({ request }) => {
   const body = await request.json().catch(() => null);
   const { ok, errors, clean } = validateScore(body);
   if (!ok) return json({ errors }, 400);
-  const { name, score, correct, rounds } = clean;
+  const { name, email, score, correct, rounds } = clean;
   // Lower-cased here, not with SQLite's lower(), which only handles A to Z.
   const player = name.toLowerCase();
 
@@ -57,9 +58,30 @@ export const POST: APIRoute = async ({ request }) => {
     .bind(player, name, score, correct, rounds)
     .run();
 
+  const entered = email && competitionOpen() ? await enter(player, email, score) : false;
   const me = await standing(player);
-  return json({ ok: true, improved: saved.meta.changes > 0, best: me?.score ?? score, rank: me?.rank ?? null });
+  return json({ ok: true, improved: saved.meta.changes > 0, best: me?.score ?? score, rank: me?.rank ?? null, entered });
 };
+
+// A competition entry: the best score saved under a name with an email, and
+// the email that came with it. True if this email holds the name's entry now
+// (it doesn't if a higher score was already entered under the name).
+async function enter(player: string, email: string, score: number) {
+  await db()
+    .prepare(
+      `INSERT INTO competition_entries (player, email, score) VALUES (?, ?, ?)
+       ON CONFLICT (player) DO UPDATE SET
+         email = excluded.email, score = excluded.score, updated_at = datetime('now')
+       WHERE excluded.score > competition_entries.score`
+    )
+    .bind(player, email, score)
+    .run();
+  const holder = await db()
+    .prepare('SELECT email FROM competition_entries WHERE player = ?')
+    .bind(player)
+    .first<string>('email');
+  return holder?.toLowerCase() === email.toLowerCase();
+}
 
 // Where a name stands: its best score (which may be an earlier run) and its
 // place on the board, matching ORDER. Null if it isn't on the board (never

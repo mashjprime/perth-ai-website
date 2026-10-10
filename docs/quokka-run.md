@@ -12,7 +12,9 @@ leaderboard needs an API and a database. Everything else on the site is still st
 | To change… | Edit… |
 | --- | --- |
 | Gate statements | `src/data/quokkaRunStatements.json` |
-| Speed, gates, scoring, difficulty, obstacles | Constants at the top of `src/scripts/quokka-run/engine.js` |
+| A competition: on or off, prize, closing date, terms | `src/data/quokkaRun.json` (see "Running a competition") |
+| Levels: speed, obstacle spacing, which obstacles | `src/scripts/quokka-run/difficulty.js` |
+| Jump, gates, points, the look of things | Constants at the top of `src/scripts/quokka-run/engine.js` |
 | Which scores are accepted | `src/scripts/quokka-run/scoring.js` (the API uses it too) |
 | The page, its copy and every screen's markup | `src/pages/quokka-run.astro` |
 | What happens on each screen, pausing, keys | `src/scripts/quokka-run/game.js` |
@@ -31,10 +33,17 @@ Some things to know before editing:
   it's a `fact`, and a `why` shown after answering. Statements sharing a topic never appear in the
   same run, so a true/false pair can't give each other away. Check facts before adding them: the
   `why` is shown as the answer.
+- **It never stops getting faster.** A new level every 20 seconds; after the first seven (which
+  bring in the obstacles) each is faster than the last, up to a top speed. At DDD the speed levelled
+  off at two minutes and people played single runs for an hour; now even a great run ends in
+  minutes, because at speed there's less and less time to see what's coming. Simulated players
+  with human reaction times last about 5 to 8 minutes; the top speed is set high enough that even
+  very fast ones don't settle in for an hour. Phones in portrait see the same stretch of road ahead
+  as landscape, so neither has an edge on the leaderboard.
 - **Scoring and the plausibility check go together.** `scoring.js` refuses a score the game
-  couldn't have produced in the time the run took. The game tops out around 46 points a second and
-  the limit is 60, checked by simulating runs of every length at 10 to 240 frames a second. Make
-  points easier to earn in `engine.js` and you may need to raise it, or real scores get refused.
+  couldn't have produced in the time the run took, working out the best possible score from the
+  same level speeds (`difficulty.js`). Make points easier to earn in `engine.js` and check the
+  limits still hold, or real scores get refused.
 - **The kiosk has its own copy.** `public/ddd-2026/` still has the original game for the booth. The
   two don't share code, so a change here doesn't reach the kiosk, and the kiosk can be deleted
   without touching this.
@@ -51,7 +60,7 @@ Some things to know before editing:
 - **Sound** is on by default and only starts once the player has pressed something. M or the
   speaker button turns it off, and that's remembered on the device.
 - **Remembered on the device:** sound on or off, the player's best score and their leaderboard
-  name (so the board can show where they are, even outside the top 10). Nothing else.
+  name (so the board can show where they are, even outside the top 10). Not the email.
 - **Reduced motion:** the start screen's self-playing demo stands still, and the level-up and
   countdown animations are off. The run itself still moves; it's the game.
 
@@ -59,8 +68,9 @@ Some things to know before editing:
 
 - **One spot per name,** at its best score. Names are matched ignoring case, so "Sam" and "sam"
   share a spot. A lower score under a name changes nothing; a higher one replaces it.
-- **Only the name is stored,** with the score, gates right and gates reached. No email, phone or IP
-  address. That's deliberate: there's nothing personal to look after.
+- **Only the name is stored,** with the score, gates right and gates reached. No phone or IP
+  address, and no email outside a competition (below), which keeps its emails in a separate table
+  that's deleted when it ends.
 - **Anyone can post a score,** so the API guards against the obvious abuse: implausible scores are
   refused, a short list of rude words is blocked, and it stops accepting saves for a minute once 30
   have landed in the last minute. A determined faker can still post a believable score. If that
@@ -76,8 +86,9 @@ npx wrangler d1 create perth-ai-quokka-run
 ```
 
 `GET /api/quokka-run/scores?limit=10&player=Sam` returns `{ top, me }`: the top of the board and
-where that name stands (`null` if it isn't on it). `POST` with `{ name, score, correct, rounds,
-seconds }` saves a run if it's that name's best and returns `{ improved, best, rank }`.
+where that name stands (`null` if it isn't on it). `POST` with `{ name, email?, score, correct,
+rounds, seconds }` saves a run if it's that name's best and returns `{ improved, best, rank,
+entered }`, where `entered` says whether it's now that name's competition entry.
 
 ### Hiding a name
 
@@ -94,6 +105,45 @@ npx wrangler d1 execute perth-ai-quokka-run --remote --command "SELECT * FROM sc
 ```
 
 To clear the whole board (a new season, say), `DELETE FROM scores` the same way.
+
+## Running a competition
+
+For example, top score by a date wins a ticket to AI Disrupt. It's switched on and described in
+`src/data/quokkaRun.json`: `active`, the `prize` (written to follow "wins"), `closes` (an ISO
+date with the Perth offset, `+08:00`), `closesLabel` for the page, and the `terms`.
+
+While it's on and before it closes:
+
+- the page shows the prize and the terms, and the start screen says what's up for grabs;
+- the save form asks for an optional email, "to be in the running";
+- a score saved with an email is an entry. Entries live in their own table,
+  `competition_entries`: one per name, holding the best score saved under it with an email, and
+  that email.
+
+At the closing time the page hides all of that by itself and the API stops taking entries, even
+before anyone redeploys.
+
+**Picking the winner.** The top entries, leaving out hidden names:
+
+```bash
+npx wrangler d1 execute perth-ai-quokka-run --remote --command "SELECT s.name, e.score, e.email, e.updated_at FROM competition_entries e JOIN scores s USING (player) WHERE s.hidden = 0 ORDER BY e.score DESC, e.updated_at ASC LIMIT 10"
+```
+
+Look the top few over before announcing: with a prize on the line, someone may post a fake score
+straight to the API. The plausibility check stops impossible scores, not believable ones. Hide a
+name you don't trust (above) and it drops out of the competition too.
+
+**Ending it.** Emails are only for contacting the winner, and the terms promise they're deleted:
+
+1. Set `"active": false` in `src/data/quokkaRun.json` and deploy. The prize, the email field
+   and the terms disappear; the game and every score stay.
+2. Delete the entries, emails and all:
+
+   ```bash
+   npx wrangler d1 execute perth-ai-quokka-run --remote --command "DROP TABLE competition_entries"
+   ```
+
+   It isn't recreated while `active` is false. A new competition later starts a fresh one.
 
 ## Testing locally
 

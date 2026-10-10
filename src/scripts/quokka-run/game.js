@@ -11,7 +11,8 @@
 //   over      the results
 
 import statements from '../../data/quokkaRunStatements.json';
-import { createEngine, CAUSES, GATE_POINTS, RESULT_MS } from './engine.js';
+import settings from '../../data/quokkaRun.json';
+import { createEngine, CAUSES, GATE_POINTS, READ_S, RESULT_MS } from './engine.js';
 import { pickRamp, LEVEL_NAMES } from './statements.js';
 import { validateScore } from './scoring.js';
 import { createFullscreen } from './fullscreen.js';
@@ -29,6 +30,10 @@ const RESULTS_SETTLE_MS = 500;
 
 const NAME_KEY = 'quokka-run-name';
 const BEST_KEY = 'quokka-run-best';
+
+// A competition on and not yet closed (src/data/quokkaRun.json).
+const competitionOpen = () =>
+  settings.competition.active && Date.now() < Date.parse(settings.competition.closes);
 
 const fmt = (n) => Number(n).toLocaleString('en-AU');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -51,6 +56,9 @@ const store = {
 };
 
 export function startQuokkaRun(stage) {
+  // The page was built while the competition was open; it may have closed since.
+  if (!competitionOpen()) document.querySelectorAll('[data-competition]').forEach((node) => node.remove());
+
   const $ = (selector) => stage.querySelector(selector);
   const el = {
     canvas: $('[data-canvas]'),
@@ -71,6 +79,7 @@ export function startQuokkaRun(stage) {
   };
   const boards = document.querySelectorAll('[data-board-list]');
   const nameInput = el.form.elements.namedItem('name');
+  const emailInput = el.form.elements.namedItem('email'); // only while a competition is on
   const stillDemo = matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Phones and tablets: a run starts in full screen, which is the only way
   // it's comfortable to play there.
@@ -171,6 +180,7 @@ export function startQuokkaRun(stage) {
     });
 
     const [level, tokens, gates, score] = ['level', 'tokens', 'gates', 'score'].map((k) => $(`[data-hud-${k}]`));
+    const eta = $('[data-gate-eta]');
     const tick = () => {
       if (!engine) return;
       const stats = engine.stats();
@@ -178,6 +188,10 @@ export function startQuokkaRun(stage) {
       tokens.textContent = `🪙 ${stats.tokens}`;
       gates.textContent = `🧠 ${stats.gatesRight}/${stats.gatesSeen}`;
       score.textContent = fmt(engine.score());
+      // The bar under the statement empties as the gate arrives, which matters
+      // at speed, when the gate itself is only on screen for a moment.
+      const left = engine.gateEta();
+      eta.style.transform = `scaleX(${left == null ? 0 : Math.min(1, left / READ_S)})`;
       hudRaf = requestAnimationFrame(tick);
     };
     tick();
@@ -311,14 +325,20 @@ export function startQuokkaRun(stage) {
     $('[data-error-name]').textContent = errors.name ?? '';
     $('[data-error-form]').textContent = errors._form ?? '';
     nameInput.setAttribute('aria-invalid', String(Boolean(errors.name)));
+    if (emailInput) {
+      $('[data-error-email]').textContent = errors.email ?? '';
+      emailInput.setAttribute('aria-invalid', String(Boolean(errors.email)));
+    }
     if (errors.name) nameInput.focus();
+    else if (errors.email) emailInput?.focus();
   }
 
   el.form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!run) return;
     const saving = run;
-    const body = { name: nameInput.value, score: run.score, correct: run.correct, rounds: run.rounds, seconds: run.seconds };
+    const email = emailInput && competitionOpen() ? emailInput.value : '';
+    const body = { name: nameInput.value, email, score: run.score, correct: run.correct, rounds: run.rounds, seconds: run.seconds };
     // The API applies the same rules; checking here saves a round trip.
     const check = validateScore(body);
     if (!check.ok) return showErrors(check.errors);
@@ -338,7 +358,7 @@ export function startQuokkaRun(stage) {
       if (run !== saving) return;
       if (!res.ok) return showErrors(data.errors ?? { _form: 'That didn’t save. Try again in a minute.' });
       store.set(NAME_KEY, check.clean.name);
-      showSaved(data, check.clean.name);
+      showSaved(data, check.clean.name, Boolean(check.clean.email));
       loadBoards();
     } catch {
       if (run !== saving) return;
@@ -351,7 +371,7 @@ export function startQuokkaRun(stage) {
     }
   });
 
-  function showSaved({ rank, best, improved }, name) {
+  function showSaved({ rank, best, improved, entered }, name, gaveEmail) {
     const title = $('[data-saved-title]');
     const hint = $('[data-saved-hint]');
     if (rank == null) {
@@ -363,6 +383,11 @@ export function startQuokkaRun(stage) {
     } else {
       title.textContent = rank === 1 ? `New high score, ${name}!` : `You’re #${rank}, ${name}.`;
       hint.textContent = rank <= BOARD_SIZE ? 'You’re on the leaderboard.' : 'Play again to climb the board.';
+    }
+    if (entered) {
+      hint.textContent = `${hint.textContent} You’re in the competition.`.trim();
+    } else if (gaveEmail) {
+      hint.textContent = `${hint.textContent} A higher score is already entered under that name, so this one isn’t in the competition.`.trim();
     }
     el.form.hidden = true;
     el.saved.hidden = false;

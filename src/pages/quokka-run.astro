@@ -5,6 +5,7 @@ import Button from '../components/Button.astro';
 import Icon from '../components/Icon.astro';
 import PixelSprite from '../components/PixelSprite.astro';
 import site from '../data/site.json';
+import settings from '../data/quokkaRun.json';
 
 /* Quokka Run, the game from our DDD Perth 2026 booth, kept for good. The game
    needs client JavaScript (it's a canvas game) and the leaderboard needs the
@@ -12,6 +13,10 @@ import site from '../data/site.json';
 
    The markup for every screen is here; src/scripts/quokka-run/game.js only
    shows and hides it and fills in the numbers. */
+
+// Everything marked data-competition goes when the competition is switched
+// off here, and game.js hides it in the browser once it closes.
+const { competition } = settings;
 
 const reportStatement = `mailto:${site.email}?subject=${encodeURIComponent('Quokka Run statement')}`;
 
@@ -56,6 +61,27 @@ const keys = [
           faster every 20 seconds.
         </p>
       </div>
+
+      {
+        competition.active && (
+          <div data-competition class="mt-6 rounded-2xl bg-sunset-500/10 p-4 ring-1 ring-sunset-500/40 sm:px-5">
+            <p class="text-white">
+              <span aria-hidden="true">🏆 </span>
+              <strong class="font-semibold text-sunset-300">Competition:</strong> the top score by{' '}
+              {competition.closesLabel} wins {competition.prize}. Leave your email when you save a score to be
+              in the running.
+            </p>
+            <details class="mt-2 text-sm text-ink-200">
+              <summary class="cursor-pointer font-semibold text-sunset-300 hover:underline">How it works</summary>
+              <ul class="mt-2 grid list-disc gap-1 pl-5">
+                {competition.terms.map((term) => (
+                  <li>{term}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        )
+      }
 
       <div
         data-quokka-run
@@ -103,6 +129,10 @@ const keys = [
             <span class="text-azure-700">Jump through: FACT</span>
             <span class="text-coral-700">Run under: HALLUCINATION</span>
           </p>
+          {/* Empties as the gate arrives (game.js). */}
+          <div data-gate-how class="mt-3 h-1.5 overflow-hidden rounded-full bg-ink-100">
+            <div data-gate-eta class="h-full origin-left rounded-full bg-orchid-500" style="transform: scaleX(1)"></div>
+          </div>
         </div>
 
         <div
@@ -122,6 +152,13 @@ const keys = [
           <p data-start-title aria-hidden="true" class="hidden font-display text-5xl font-bold text-white sm:text-6xl">
             Quokka <span class="text-sunset-500">Run</span>
           </p>
+          {
+            competition.active && (
+              <p data-competition class="max-w-sm rounded-2xl bg-ink-950/75 px-3 py-1 text-sm font-semibold text-sunset-300 ring-1 ring-sunset-500/50">
+                <span aria-hidden="true">🏆 </span>Top score by {competition.closesLabel} wins {competition.prize}
+              </p>
+            )
+          }
           <p data-start-best hidden class="text-sm font-semibold text-sunbeam-400"></p>
           <button type="button" data-play class={`${primaryButton} px-8 py-4 font-display text-xl`}>
             <Icon name="play" class="h-5 w-5" />
@@ -190,6 +227,30 @@ const keys = [
                 <p id="qr-name-hint" class="mt-1 text-sm text-ink-300">
                   One spot per name, at its best score. We keep the name and the score, nothing else.
                 </p>
+                {
+                  competition.active && (
+                    <div data-competition class="mt-4">
+                      <label for="qr-email" class="block text-sm font-semibold text-white">
+                        Email, to be in the running for the prize
+                      </label>
+                      <input
+                        id="qr-email"
+                        name="email"
+                        type="email"
+                        inputmode="email"
+                        maxlength="120"
+                        autocomplete="email"
+                        enterkeyhint="done"
+                        aria-describedby="qr-email-error qr-email-hint"
+                        class="mt-2 w-full rounded-lg border border-ink-400 bg-white px-3 py-2.5 text-base text-ink-900"
+                      />
+                      <p id="qr-email-error" data-error-email class="mt-1.5 text-sm font-semibold text-coral-300"></p>
+                      <p id="qr-email-hint" class="mt-1 text-sm text-ink-300">
+                        Optional. Only used to contact you if you win, and deleted when the competition ends.
+                      </p>
+                    </div>
+                  )
+                }
                 <p data-error-form role="alert" class="mt-2 text-sm font-semibold text-coral-300"></p>
                 <div class="mt-5 flex flex-wrap gap-3">
                   <button type="submit" class={primaryButton}>Save my score</button>

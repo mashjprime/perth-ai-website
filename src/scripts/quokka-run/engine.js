@@ -1,7 +1,8 @@
 // Quokka Run's engine: a one-tap endless runner drawn on a canvas. Tap to jump
 // over hallucination bugs, rate limits and GPU fires. Every so often a gate
 // shows a statement: jump through it for FACT, run under for HALLUCINATION.
-// It levels up every LEVEL_EVERY_S seconds (faster, tighter, new obstacles).
+// It levels up every LEVEL_EVERY_S seconds and never stops getting faster
+// (see difficulty.js).
 //
 // The same engine plays itself (autopilot) behind the start screen.
 //
@@ -10,32 +11,28 @@
 // the plausibility limits in scoring.js still hold.
 
 import { sprites } from './sprites.js';
+import { levelAt, LEVEL_EVERY_S, START_SPEED } from './difficulty.js';
 
 // World units: the playfield is ~540 units tall on a landscape screen.
 const PX = 4; // world units per sprite pixel
 const QUOKKA = { x: 120, w: 20 * PX, h: 16 * PX };
+// How much road every player sees, whatever their screen. Wider screens get
+// more picture, but obstacles still appear at this distance and the road fades
+// out beyond it, so nobody gets longer to react (it matters at speed).
+const VIEW_W = 900;
+const MIN_LABEL_PX = 11; // gate labels never smaller than this on screen, if the gate's wide enough
 const GRAVITY = 2600;
 const JUMP_V = 900; // ~155 units high, ~0.7s in the air
 const BUFFER_S = 0.12; // a tap just before landing still jumps
-const START_SPEED = 380;
 const ACCEL = 8; // units/s gained per second, up to the current level's top speed
 const DEMO_MAX_SPEED = 560; // autopilot stays watchable
-const LEVEL_EVERY_S = 20;
-
-// speed: top speed. gap: seconds of travel between obstacles, [minimum, random extra].
-// Obstacle kinds accumulate: each level adds to the ones before it.
-const LEVELS = [
-  { speed: 440, gap: [0.95, 0.9], adds: ['bug', 'gpu'] },
-  { speed: 520, gap: [0.9, 0.8], adds: ['sign'], note: '429 rate limits ahead' },
-  { speed: 600, gap: [0.9, 0.7], adds: ['pair'], note: 'Hallucinations come in pairs now' },
-  { speed: 680, gap: [0.85, 0.6], adds: ['drone'], note: 'Flying hallucinations. Stay low.' },
-  { speed: 760, gap: [0.85, 0.5], adds: ['triple'], note: 'Hallucinations in threes now' },
-  { speed: 840, gap: [0.8, 0.45], adds: [], note: 'Faster…' },
-  { speed: 900, gap: [0.8, 0.4], adds: [], note: 'Maximum hallucination' },
-].map((level, i, all) => ({ ...level, kinds: all.slice(0, i + 1).flatMap((l) => l.adds) }));
+// The world moves at most this far per physics step. At top speed on a slow
+// device one frame can be over 100 units, enough to skip clean past an
+// obstacle, so a long frame is split into smaller steps.
+const MAX_STEP_UNITS = 30;
 const FIRST_GATE_S = 12;
 const GATE_EVERY_S = 22;
-const READ_S = 7; // time between a statement appearing and reaching its gate
+export const READ_S = 7; // time between a statement appearing and reaching its gate
 const GATE = { w: 130, split: 92, top: 250 }; // split = height of the HALLUCINATION panel
 export const GATE_POINTS = { 1: 150, 2: 250, 3: 400 }; // by statement difficulty
 const TOKEN_POINTS = 20;
@@ -83,6 +80,7 @@ export function createEngine(canvas, {
   let G = 0; // ground line
   let raf = 0;
   let last = 0;
+  let zoom = 1; // screen pixels per world unit
   let paused = false;
   let overTimer = 0;
 
@@ -116,12 +114,12 @@ export function createEngine(canvas, {
     if (!w || !h) return;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    // Zoom from a target visible width so the quokka and obstacles stay a usable
-    // size in every orientation. A narrow portrait phone used to zoom the world
-    // right out, leaving the ground stranded mid-screen with an empty lower half.
+    // Zoom so every screen sees the same stretch of road ahead, in either
+    // orientation. It used to be 620 wide in portrait, for bigger sprites on a
+    // phone, but at high speed that left portrait players a fraction of a
+    // second less to react, which isn't fair on a shared leaderboard.
     const portrait = h > w;
-    const targetW = portrait ? 620 : 900;
-    let scale = w / targetW;
+    let scale = w / VIEW_W;
     scale = Math.min(scale, h / 460); // keep world height >= 460 so the 250-tall gates still fit above the ground
     W = w / scale;
     H = h / scale;
@@ -133,6 +131,7 @@ export function createEngine(canvas, {
     if (canvas.parentElement) {
       canvas.parentElement.style.setProperty('--ground-px', Math.max(0, Math.round(h - G * scale)) + 'px');
     }
+    zoom = scale;
     ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
     // Resizing clears the canvas, and a paused game isn't drawing frames.
@@ -163,9 +162,9 @@ export function createEngine(canvas, {
   // ----- spawning -----
 
   function spawnObstacle() {
-    const { kinds, gap } = LEVELS[s.level];
+    const { kinds, gap } = levelAt(s.level);
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
-    const x = W + 20;
+    const x = VIEW_W + 20;
     const bug = (i) => ({ kind: 'bug', x: x + i * 12 * PX, y: 0, w: 12 * PX, h: 10 * PX });
     if (kind === 'bug') s.obstacles.push(bug(0));
     if (kind === 'pair') s.obstacles.push(bug(0), bug(1));
@@ -179,7 +178,7 @@ export function createEngine(canvas, {
   }
 
   function spawnCoin() {
-    s.coins.push({ x: W + 20, y: 70 + Math.random() * 80, r: 12 });
+    s.coins.push({ x: VIEW_W + 20, y: 70 + Math.random() * 80, r: 12 });
     s.coinIn = s.speed * (1.5 + Math.random() * 2.5);
   }
 
@@ -217,12 +216,12 @@ export function createEngine(canvas, {
   function update(dt) {
     if (s.over) return;
     s.clock += dt;
-    const level = Math.min(LEVELS.length - 1, Math.floor(s.clock / LEVEL_EVERY_S));
+    const level = Math.floor(s.clock / LEVEL_EVERY_S);
     if (level !== s.level) {
       s.level = level;
-      onLevel?.(level + 1, LEVELS[level].note);
+      onLevel?.(level + 1, levelAt(level).note);
     }
-    if (!s.gate) s.speed = Math.min(speedCap, LEVELS[level].speed, s.speed + ACCEL * dt);
+    if (!s.gate) s.speed = Math.min(speedCap, levelAt(level).speed, s.speed + ACCEL * dt);
     const dx = s.speed * dt;
     s.dist += dx;
     s.score += dx / 40;
@@ -375,16 +374,48 @@ export function createEngine(canvas, {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = COLORS.fact;
-    ctx.font = '700 22px "Space Grotesk Variable", sans-serif';
-    ctx.fillText('FACT', x + GATE.w / 2, (topY + splitY) / 2 - 10);
-    ctx.font = '700 15px "Space Grotesk Variable", sans-serif';
-    ctx.fillText('↑ jump', x + GATE.w / 2, (topY + splitY) / 2 + 14);
+    labels(x + GATE.w / 2, (topY + splitY) / 2, ['FACT', 22], ['↑ jump', 15]);
     ctx.fillStyle = COLORS.hallu;
-    ctx.font = '700 13px "Space Grotesk Variable", sans-serif';
-    ctx.fillText('HALLUCINATION', x + GATE.w / 2, splitY + GATE.split / 2 - 8);
-    ctx.font = '700 15px "Space Grotesk Variable", sans-serif';
-    ctx.fillText('run under', x + GATE.w / 2, splitY + GATE.split / 2 + 14);
+    // On a zoomed-out phone HALLUCINATION won't fit the gate at a readable size, so it splits.
+    const hallu = fits('HALLUCINATION', 13) ? [['HALLUCINATION', 13]] : [['HALLU-', 13], ['CINATION', 13]];
+    labels(x + GATE.w / 2, splitY + GATE.split / 2, ...hallu, ['run under', 15]);
     ctx.globalAlpha = 1;
+  }
+
+  // Lines of gate label centred on (cx, cy). Each is its normal size, or
+  // MIN_LABEL_PX on screen if that's bigger (a zoomed-out phone), but never
+  // wider than the gate.
+  const labelSize = (text, size) => {
+    const px = Math.max(size, MIN_LABEL_PX / zoom);
+    ctx.font = `700 ${px}px "Space Grotesk Variable", sans-serif`;
+    return Math.min(px, (px * (GATE.w - 10)) / ctx.measureText(text).width);
+  };
+  const fits = (text, size) => labelSize(text, size) * zoom >= MIN_LABEL_PX - 0.5;
+
+  function labels(cx, cy, ...lines) {
+    const fonts = lines.map(([text, size]) => labelSize(text, size));
+    const gap = 4;
+    let y = cy - (fonts.reduce((a, b) => a + b, 0) + gap * (lines.length - 1)) / 2;
+    lines.forEach(([text], i) => {
+      ctx.font = `700 ${fonts[i]}px "Space Grotesk Variable", sans-serif`;
+      ctx.fillText(text, cx, y + fonts[i] / 2);
+      y += fonts[i] + gap;
+    });
+  }
+
+  // Past VIEW_W the road fades to dark, so a wide screen shows more sky and
+  // city but no more of what's coming.
+  function drawFog() {
+    if (W <= VIEW_W) return;
+    // Starts at VIEW_W exactly, so everything a 16:9 screen sees is just as
+    // clear here; obstacles appear at VIEW_W + 20, inside the dark.
+    const fade = ctx.createLinearGradient(VIEW_W, 0, VIEW_W + 20, 0);
+    fade.addColorStop(0, 'rgb(5 10 23 / 0)');
+    fade.addColorStop(1, 'rgb(5 10 23 / 0.96)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(VIEW_W, 0, 20, H);
+    ctx.fillStyle = 'rgb(5 10 23 / 0.96)';
+    ctx.fillRect(VIEW_W + 20, 0, W - VIEW_W - 20, H);
   }
 
   function draw() {
@@ -410,12 +441,17 @@ export function createEngine(canvas, {
       img(frame, QUOKKA.x, s.y);
     }
     if (s.gate) drawGate(s.gate, true);
+    drawFog();
   }
 
   function loop(now) {
-    const dt = Math.min(0.05, (now - (last || now)) / 1000);
+    // A frame longer than 0.1s (under 10 fps) plays as 0.1s, so a stall can't
+    // teleport the world. Below that the game runs a little slow; above it,
+    // the substeps keep a long frame accurate.
+    const dt = Math.min(0.1, (now - (last || now)) / 1000);
     last = now;
-    update(dt);
+    const steps = Math.max(1, Math.ceil((s.speed * dt) / MAX_STEP_UNITS));
+    for (let i = 0; i < steps; i++) update(dt / steps);
     draw();
     raf = requestAnimationFrame(loop);
   }
@@ -450,6 +486,10 @@ export function createEngine(canvas, {
     },
     score: () => Math.round(s.score),
     stats: () => ({ tokens: s.tokens, gatesRight: s.gatesRight, gatesSeen: s.gatesSeen, level: s.level + 1 }),
+    // Seconds until the quokka reaches the open gate, or null if there isn't one.
+    // (Speed holds steady while a gate is open, so this counts down evenly.)
+    gateEta: () =>
+      s.gate && !s.gate.done ? Math.max(0, (s.gate.x - QUOKKA.x - QUOKKA.w) / Math.max(1, s.speed)) : null,
     stop() {
       cancelAnimationFrame(raf);
       clearTimeout(overTimer);
