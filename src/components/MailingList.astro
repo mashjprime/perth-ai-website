@@ -23,12 +23,25 @@ const action = site.mailingList.formAction;
         action={action}
         method="post"
         data-mailing-list
-        class="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row"
+        class="mx-auto mt-8 flex max-w-xl flex-col gap-3 sm:flex-row"
       >
-        {/* Brevo's field names: EMAIL must be upper case, and Brevo drops any
-            submission where the honeypot email_address_check is filled in.
-            Every field marked required in the Brevo form has to be here too,
-            or Brevo refuses the sign-up. */}
+        {/* Brevo's field names: FIRSTNAME and EMAIL must be upper case, and
+            Brevo drops any submission where the honeypot email_address_check
+            is filled in. Brevo answers "success" even when a field it needs
+            is missing, so keep the required fields here in step with the
+            Brevo form (currently first name and email). */}
+        <label for="mailing-list-name" class="sr-only">
+          First name
+        </label>
+        <input
+          id="mailing-list-name"
+          type="text"
+          name="FIRSTNAME"
+          required
+          autocomplete="given-name"
+          placeholder="First name"
+          class="rounded-xl border border-ink-700 bg-ink-800 px-4 py-3 text-sm text-white placeholder:text-ink-400 focus:border-sunset-500 focus:outline-none focus:ring-1 focus:ring-sunset-500 sm:w-36"
+        />
         <label for="mailing-list-email" class="sr-only">
           Email address
         </label>
@@ -39,7 +52,7 @@ const action = site.mailingList.formAction;
           required
           autocomplete="email"
           placeholder="you@example.com"
-          class="flex-1 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3 text-sm text-white placeholder:text-ink-400 focus:border-sunset-500 focus:outline-none focus:ring-1 focus:ring-sunset-500"
+          class="min-w-0 flex-1 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3 text-sm text-white placeholder:text-ink-400 focus:border-sunset-500 focus:outline-none focus:ring-1 focus:ring-sunset-500"
         />
         <input type="text" name="email_address_check" value="" class="hidden" tabindex="-1" autocomplete="off" aria-hidden="true" />
         <input type="hidden" name="locale" value="en" />
@@ -50,7 +63,7 @@ const action = site.mailingList.formAction;
           Subscribe
         </button>
       </form>
-      <p data-mailing-list-status data-email={site.email} role="status" class="mx-auto mt-4 max-w-md text-sm text-ink-200/85"></p>
+      <p data-mailing-list-status data-email={site.email} role="status" class="mx-auto mt-4 max-w-xl text-sm text-ink-200/85"></p>
     ) : (
       <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
         <Button href={site.links.luma} variant="primary">
@@ -65,8 +78,11 @@ const action = site.mailingList.formAction;
 </div>
 
 <script>
-  // Without this the form still works: it posts straight to Brevo, which shows
-  // its own page. This keeps people on our page instead. It asks Brevo for JSON
+  // Without this the form still works, but only just: it posts straight to
+  // Brevo, which signs them up and shows a bare {"success":true}. This keeps
+  // people on our page and tells them to check their inbox, because the list
+  // is double opt-in and nobody is added until they click the link Brevo
+  // emails them. It asks Brevo for JSON
   // the same way Brevo's own embed script does (?isAjax=1), and Brevo allows
   // our origin to read the reply.
   for (const form of document.querySelectorAll<HTMLFormElement>('form[data-mailing-list]')) {
